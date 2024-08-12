@@ -533,6 +533,8 @@ void System::Shutdown()
     {
         Verbose::PrintMess("Atlas saving to file " + mStrSaveAtlasToFile, Verbose::VERBOSITY_NORMAL);
         SaveAtlas(FileType::BINARY_FILE);
+
+        //SavePointCloud(mStrSaveAtlasToFile + "_pc.txt");
     }
 
     /*if(mpViewer)
@@ -548,6 +550,89 @@ void System::Shutdown()
 bool System::isShutDown() {
     unique_lock<mutex> lock(mMutexReset);
     return mbShutDown;
+}
+
+void System::SavePointCloud(const string &filename){
+    // Code is based on MapDrawer::DrawMapPoints()
+    cout << endl << "Saving map point coordinates to " << filename << " ..." << endl;
+
+    vector<Map*> vpAllMaps = mpAtlas->GetAllMaps();
+
+    int numMaxPs = 0;
+    Map* pBiggerMap;
+    std::cout << "There are " << std::to_string(vpAllMaps.size()) << " maps in the atlas" << std::endl;
+    for(Map* pMap : vpAllMaps)
+    {
+        /*std::cout << "  Map " << std::to_string(pMap->GetId()) << " has " << std::to_string(pMap->GetAllMapPoints().size()) << " Points" << std::endl;
+        if(pMap->GetAllMapPoints().size() > numMaxPs)
+        {
+            numMaxPs = pMap->GetAllMapPoints().size();
+            pBiggerMap = pMap;
+        }*/
+
+        // Vectors containing pointers to MapPoint objects contained in the maps
+        // Vector of pointers for Map Points -- vpMPs
+        // Vector of pointers for Reference Map Points -- vpRefMPs
+        // TODO figure out the difference between Reference Map Points and normal Map Points
+        const vector<MapPoint*> &vpMPs = pMap->GetAllMapPoints();
+        const vector<MapPoint*> &vpRefMPs = pMap->GetReferenceMapPoints();
+
+        if(vpMPs.empty()){
+            cout << endl << "Vector of map points vpMPs is empty!" << endl;
+            return;
+        }
+
+        // Use a set for fast lookup of reference frames
+        set<MapPoint*> spRefMPs(vpRefMPs.begin(), vpRefMPs.end());
+
+        // Get the output file stream in fixed-point format for map points
+        ofstream f;
+        f << "#Map Id " << to_string(pMap->GetId()) << endl;
+        f << "pos_x, pos_y, pos_z";
+        f.open((pMap->GetId() + "_" + filename).c_str());
+        f << fixed;
+
+        // TODO figure out if we need to consider whether the presence of IMU
+        // requires some transforms/exceptions
+
+        // Iterate over map points, skip "bad" ones and reference map points
+        for (size_t i=0, iend=vpMPs.size(); i<iend;i++)
+        {
+            if (vpMPs[i]->isBad() || spRefMPs.count(vpMPs[i])){
+                continue;
+            }
+            Eigen::Matrix<float,3,1> pos = vpMPs[i]->GetWorldPos();
+            f << pos(0) << ", " << pos(1) << ", " << pos(2) << endl;
+        }
+
+        // Close the output stream
+        f.close();
+
+        // Get the output file stream in fixed-point format for reference map points
+        f.open(("ref_" + to_string(pMap->GetId()) + "_" + filename).c_str());
+        f << "pos_x, pos_y, pos_z" << endl;
+        f << fixed;
+
+        // Iterate over reference map points, skip if bad
+        for (set<MapPoint*>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
+        {
+            if((*sit)->isBad()){
+                continue;
+            }
+            Eigen::Matrix<float,3,1> pos = (*sit)->GetWorldPos();
+            f << pos(0) << ", " << pos(1) << ", " << pos(2) << endl;
+        }
+
+        // Close the output stream
+        f.close();
+    }
+
+    /*Map* pActiveMap = mpAtlas->GetCurrentMap();
+    if(!pActiveMap) {
+        cout << endl << "There is no active map (pActiveMap is null)" << endl;
+        return;
+    }*/
+
 }
 
 void System::SaveTrajectoryTUM(const string &filename)
@@ -682,6 +767,7 @@ void System::SaveTrajectoryEuRoC(const string &filename)
     f.open(filename.c_str());
     // cout << "file open" << endl;
     f << fixed;
+    f << "#Map Id " << to_string(pBiggerMap->GetId()) << endl;
 
     // Frame pose is stored relative to its reference keyframe (which is optimized by BA and pose graph).
     // We need to get first the keyframe pose and then concatenate the relative transformation.
@@ -1068,6 +1154,7 @@ void System::SaveKeyFrameTrajectoryEuRoC(const string &filename)
     ofstream f;
     f.open(filename.c_str());
     f << fixed;
+    f << "#Map Id " << to_string(pBiggerMap->GetId()) << endl;
 
     for(size_t i=0; i<vpKFs.size(); i++)
     {

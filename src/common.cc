@@ -17,6 +17,8 @@ ros::Publisher tracked_mappoints_pub, all_mappoints_pub;
 ros::Publisher tracked_keypoints_pub;
 image_transport::Publisher tracking_img_pub;
 
+bool stop_publish_topics = false;
+
 //////////////////////////////////////////////////
 // Main functions
 //////////////////////////////////////////////////
@@ -35,10 +37,18 @@ bool save_map_srv(orb_slam3_ros::SaveMap::Request &req, orb_slam3_ros::SaveMap::
 
 bool save_traj_srv(orb_slam3_ros::SaveMap::Request &req, orb_slam3_ros::SaveMap::Response &res)
 {
+    stop_publish_topics = true;
+
     const string cam_traj_file = req.name + "_cam_traj.txt";
     const string kf_traj_file = req.name + "_kf_traj.txt";
 
+    ROS_INFO("Start task to save trajectory.");
+
     try {
+        //ROS_INFO("Shutdown SLAM...");
+        //pSLAM->Shutdown(); // Integrated by ourself according to function description of SaveTrajectoryEuRoC
+        
+        ROS_INFO("Saving trajectory...");
         pSLAM->SaveTrajectoryEuRoC(cam_traj_file);
         pSLAM->SaveKeyFrameTrajectoryEuRoC(kf_traj_file);
         res.success = true;
@@ -50,8 +60,45 @@ bool save_traj_srv(orb_slam3_ros::SaveMap::Request &req, orb_slam3_ros::SaveMap:
         res.success = false;
     }
 
-    if (!res.success)
+    if (res.success)
+        ROS_INFO("Estimated trajectory was saved as %s and %s", cam_traj_file.c_str(), kf_traj_file.c_str());
+    else
         ROS_ERROR("Estimated trajectory could not be saved.");
+
+    stop_publish_topics = false;
+
+    return res.success;
+}
+
+bool save_point_cloud_srv(orb_slam3_ros::SaveMap::Request &req, orb_slam3_ros::SaveMap::Response &res) {
+    stop_publish_topics = true;
+
+    const string point_coud_file = req.name + "_point_cloud.txt";
+
+    ROS_INFO("Start task to save pointcloud.");
+
+    try {
+        //ROS_INFO("Shutdown SLAM...");
+        //pSLAM->Shutdown(); // Integrated by ourself according to function description of SaveTrajectoryEuRoC
+
+        ROS_INFO("Start saving pointcloud...");
+        pSLAM->SavePointCloud(point_coud_file);
+
+        res.success = true;
+    } catch (const std::exception &e) {
+        std::cerr << e.what() << std::endl;
+        res.success = false;
+    } catch (...) {
+        std::cerr << "Unknows exeption" << std::endl;
+        res.success = false;
+    }
+
+    if (res.success)
+        ROS_INFO("Pointcloud was saved as %s", point_coud_file.c_str());
+    else
+        ROS_ERROR("Pointcloud could not be saved.");
+
+    stop_publish_topics = false;
 
     return res.success;
 }
@@ -60,6 +107,7 @@ void setup_services(ros::NodeHandle &node_handler, std::string node_name)
 {
     static ros::ServiceServer save_map_service = node_handler.advertiseService(node_name + "/save_map", save_map_srv);
     static ros::ServiceServer save_traj_service = node_handler.advertiseService(node_name + "/save_traj", save_traj_srv);
+    static ros::ServiceServer save_point_cloud_service = node_handler.advertiseService(node_name + "/save_point_cloud", save_point_cloud_srv);
 }
 
 void setup_publishers(ros::NodeHandle &node_handler, image_transport::ImageTransport &image_transport, std::string node_name)
@@ -84,6 +132,9 @@ void setup_publishers(ros::NodeHandle &node_handler, image_transport::ImageTrans
 
 void publish_topics(ros::Time msg_time, Eigen::Vector3f Wbb)
 {
+    if (stop_publish_topics)
+        return;
+
     Sophus::SE3f Twc = pSLAM->GetCamTwc();
 
     if (Twc.translation().array().isNaN()[0] || Twc.rotationMatrix().array().isNaN()(0,0)) // avoid publishing NaN
